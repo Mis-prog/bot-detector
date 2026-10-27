@@ -1,0 +1,10 @@
+.venv
+.idea
+.git
+cache
+data
+notebooks
+submissions
+scripts
+monitoring
+__pycache__

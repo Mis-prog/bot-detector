@@ -1,0 +1,95 @@
+# bot-detector: сервис + реестр моделей MLflow + мониторинг Prometheus/Grafana.
+#
+#   docker compose up -d --build        # MLflow, сервис, Prometheus, Grafana
+#   docker compose run --rm train       # обучить модель и зарегистрировать в MLflow
+#
+# Сервис сам подхватит модель-чемпиона из реестра (проверяет раз в 30 с).
+
+name: bot-detector
+
+x-app: &app
+  build: .
+  image: bot-detector:0.1.0
+  environment:
+    MLFLOW_TRACKING_URI: http://mlflow:5000
+    MODEL_NAME: bot-detector
+
+services:
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.17.2
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --allowed-hosts mlflow,mlflow:5000,localhost,localhost:5050,127.0.0.1,127.0.0.1:5050
+    ports:
+      - "5050:5000"  # 5000 на macOS занят AirPlay
+    volumes:
+      - mlflow-data:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  train:
+    <<: *app
+    command: ["python", "-m", "bot_detector.train"]
+    volumes:
+      - ./data:/app/data:ro
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    profiles: ["train"]
+
+  api:
+    <<: *app
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: bot-detector
+      MODEL_ALIAS: champion
+      MODEL_POLL_SECONDS: "30"
+      MODEL_THREADS: "1"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.7.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/bot-detector.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+volumes:
+  mlflow-data:
+  prometheus-data:
+  grafana-data:

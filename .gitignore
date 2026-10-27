@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+data/
+submissions/
+
+# Virtual environments
+.venv
+
+# IDE и macOS
+.idea/
+.DS_Store
+
+# эмбеддинги, их пересчитывает scripts/embed.py
+cache/
