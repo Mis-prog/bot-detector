@@ -1,4 +1,4 @@
-"""Модель для MLflow: пайплайн LightGBM + энкодер rubert-tiny2 + температура в одном артефакте."""
+"""Модель для MLflow: пайплайн LightGBM + энкодер rubert-tiny2 в одном артефакте."""
 import json
 import os
 import time
@@ -8,7 +8,7 @@ import mlflow.pyfunc
 import numpy as np
 import pandas as pd
 
-from bot_detector.features import KEYS, apply_temperature, build_features, participants_of
+from bot_detector.features import KEYS, build_features, participants_of
 
 MESSAGE_COLUMNS = ['dialog_id', 'message', 'participant_index', 'text']
 
@@ -39,7 +39,6 @@ class BotDetectorModel(mlflow.pyfunc.PythonModel):
         feature_names = self.pipeline.named_steps['features'].feature_names_in_
         df = build_features(participants_of(msgs), msgs, emb)
         p = self.pipeline.predict_proba(df[feature_names])[:, 1]
-        p = apply_temperature(p, self.config['temperature'])
         clip = self.config['clip']
         return df[KEYS].assign(is_bot=np.clip(p, clip, 1 - clip))
 

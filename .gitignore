@@ -17,3 +17,7 @@ submissions/
 
 # эмбеддинги, их пересчитывает scripts/embed.py
 cache/
+
+# презентация
+node_modules/
+presentation/dist/

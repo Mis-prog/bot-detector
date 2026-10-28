@@ -1,14 +1,13 @@
 # bot-detector
 
-Определяет, кто из двух участников диалога — бот. Модель — LightGBM на TF-IDF, статистиках текста и признаках из эмбеддингов `rubert-tiny2` с температурной калибровкой; разбор решения — в `notebooks/solution.ipynb`.
+Определяет, кто из двух участников диалога — бот. Модель сервиса — LightGBM на статистиках текста и признаках из эмбеддингов `rubert-tiny2`. Разбор решения — в `notebooks/solution.ipynb`; там для соревнования есть ещё TF-IDF по буквенным n-граммам (LogLoss 0.195 против 0.200 без него), в сервисе он убран ради скорости.
 
 ## Структура
 
 ```
 bot_detector/        код модели: признаки, обучение, MLflow-модель, FastAPI-сервис
 notebooks/
-  eda.ipynb          исследование данных и первые модели
-  solution.ipynb     итоговое решение для соревнования
+  solution.ipynb     исследование данных, бейзлайн, модели, подбор параметров и итоговый сабмит
 scripts/
   embed.py           эмбеддинги rubert-tiny2 для solution.ipynb (отдельным процессом)
   load_test.py       сверка ответов сервиса и нагрузочный тест
@@ -16,6 +15,8 @@ submissions/         сабмиты; итоговый — submission.csv
 monitoring/          конфиги Prometheus и Grafana
 data/                данные соревнования
 Dockerfile, docker-compose.yml
+deploy.sh            развернуть стек одной командой
+presentation/        слайды с итогами (Slidev): cd presentation && npm install && npm run dev
 ```
 
 Все скрипты запускаются из корня проекта; ноутбуки сами переходят в корень, поэтому пути `data/`, `cache/`, `submissions/` в них общие.
@@ -44,13 +45,20 @@ Dockerfile, docker-compose.yml
 ## Запуск
 
 ```bash
+./deploy.sh            # поднять стек и обучить модель, если её ещё нет в реестре; ждёт готовности сервиса
+./deploy.sh --train    # то же, но обучить новую версию в любом случае
+```
+
+То же вручную:
+
+```bash
 docker compose up -d --build     # MLflow, api, Prometheus, Grafana
 docker compose run --rm train    # обучить и зарегистрировать модель (данные из ./data)
 ```
 
 Сервис раз в 30 секунд проверяет алиас `champion` в реестре и подменяет модель без перезапуска. Пока модели нет, `/health` и `/v1/predict` отвечают 503.
 
-Новая версия становится `champion`, только если её `cv_logloss_calibrated` лучше, чем у текущей. Вручную сменить версию можно в UI MLflow (Models → bot-detector → алиасы) — сервис подхватит её сам.
+Новая версия становится `champion`, только если её `cv_logloss` лучше, чем у текущей. Сделать новую версию `champion` в любом случае: `docker compose run --rm train python -m bot_detector.train --promote`. Вручную сменить версию можно в UI MLflow (Models → bot-detector → алиасы) — сервис подхватит её сам.
 
 ## Запрос
 
@@ -75,7 +83,7 @@ uv run python scripts/load_test.py --concurrency 4 --duration 60
 ## Устройство кода
 
 - `bot_detector/features.py` — признаки; один код для обучения и сервиса, поэтому они не расходятся.
-- `bot_detector/model.py` — модель MLflow (`pyfunc`): пайплайн + энкодер + температура в одном артефакте, сервису не нужен доступ к HuggingFace.
+- `bot_detector/model.py` — модель MLflow (`pyfunc`): пайплайн + энкодер в одном артефакте, сервису не нужен доступ к HuggingFace.
 - `bot_detector/train.py` — обучение, метрики CV, регистрация в MLflow.
 - `bot_detector/api.py` — FastAPI и метрики Prometheus.
 - `monitoring/` — конфиги Prometheus и Grafana (источник данных и дашборд подключаются автоматически).

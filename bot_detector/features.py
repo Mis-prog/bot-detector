@@ -1,6 +1,7 @@
 """Признаки участника диалога. Один и тот же код для обучения и для сервиса.
 
-Логика перенесена из solution.ipynb без изменений.
+Логика перенесена из solution.ipynb, но без TF-IDF: он давал 0.003 LogLoss и удваивал время predict_proba.
+Тексты участников (text, partner_text) build_features по-прежнему собирает — их ждут старые версии модели с TF-IDF.
 """
 import json
 
@@ -8,7 +9,6 @@ import lightgbm as lgb
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
 
 KEYS = ['dialog_id', 'participant_index']
@@ -144,31 +144,21 @@ def build_features(participants, msgs, emb):
 
 def feature_columns(emb_dim):
     emb_cols = [f'emb_{j}' for j in range(emb_dim)]
-    numeric = (
+    return (
         ['n_messages', 'mean_len', 'partner_n_messages', 'partner_mean_len']
         + STAT_COLS + ['partner_' + c for c in STAT_COLS]
         + COH_COLS + ['partner_' + c for c in COH_COLS]
         + emb_cols + ['partner_' + c for c in emb_cols]
     )
-    return ['text', 'partner_text'] + numeric, numeric
 
 
-def make_model(numeric_features, seed=42):
-    """Гиперпараметры подобраны Optuna в eda.ipynb."""
+def make_model(features, seed=42):
+    """Гиперпараметры подобраны Optuna в notebooks/solution.ipynb (для модели с TF-IDF)."""
     return Pipeline([
-        ('features', ColumnTransformer([
-            ('char', TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4), min_df=3, max_features=20000, sublinear_tf=True), 'text'),
-            ('partner_char', TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 4), min_df=3, max_features=20000, sublinear_tf=True), 'partner_text'),
-            ('num', 'passthrough', numeric_features),
-        ])),
+        ('features', ColumnTransformer([('num', 'passthrough', features)])),
         ('clf', lgb.LGBMClassifier(
             n_estimators=700, learning_rate=0.024, num_leaves=22, min_child_samples=18,
             subsample=0.94, subsample_freq=1, colsample_bytree=0.5, reg_lambda=0.53,
             random_state=seed, verbose=-1,
         )),
     ])
-
-
-def apply_temperature(p, temperature):
-    p = np.clip(p, 1e-15, 1 - 1e-15)
-    return 1 / (1 + np.exp(-np.log(p / (1 - p)) / temperature))
